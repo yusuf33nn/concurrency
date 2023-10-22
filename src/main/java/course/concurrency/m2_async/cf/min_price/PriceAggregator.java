@@ -1,14 +1,14 @@
 package course.concurrency.m2_async.cf.min_price;
 
 import java.util.Collection;
-import java.util.Collections;
 import java.util.List;
+import java.util.Objects;
 import java.util.Set;
 import java.util.concurrent.CompletableFuture;
-import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.Executor;
 import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
+import java.util.stream.Collectors;
 
 public class PriceAggregator {
 
@@ -25,18 +25,17 @@ public class PriceAggregator {
     }
 
     public double getMinPrice(long itemId){
-        Executor executor = Executors.newFixedThreadPool(51);
-        List<Double> prices = new CopyOnWriteArrayList<>();
-        shopIds.forEach(e -> {
-            CompletableFuture.supplyAsync(() -> priceRetriever.getPrice(itemId, e), executor)
-                    .orTimeout(3, TimeUnit.SECONDS)
-                    .thenApply(prices::add);
-        });
-        try {
-            Thread.sleep(2950);
-        } catch (InterruptedException e) {
-            throw new RuntimeException(e);
-        }
-        return !prices.isEmpty() ? Collections.min(prices) : 0/0d;
+        Executor executor = Executors.newCachedThreadPool();
+        List<CompletableFuture<Double>> futures = shopIds.stream()
+                .map(shopId -> CompletableFuture.supplyAsync(() -> priceRetriever.getPrice(itemId,shopId), executor)
+                        .completeOnTimeout(null, 2900, TimeUnit.MILLISECONDS)
+                        .exceptionally(e -> null))
+                .collect(Collectors.toList());
+
+        return futures.stream()
+                .map(CompletableFuture::join)
+                .filter(Objects::nonNull)
+                .min(Double::compare)
+                .orElse(Double.NaN);
     }
 }
